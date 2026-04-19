@@ -1,0 +1,21 @@
+[project]
+name = "tibber-power"
+version = "0.1.0"
+description = "CLI tool to download power consumption data from Tibber API"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "pandas>=2.0.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+tibber-power = "tibber_power.cli:app"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.11",
+]
+
