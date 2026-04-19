@@ -1,5 +1,5 @@
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TibberConfig(BaseSettings):
