@@ -45,28 +45,25 @@ def download(
         None,
         "--token",
         "-t",
-        help="Tibber access token (or set TIBBER_ACCESS_TOKEN env var)",
+        help="Tibber access token",
     ),
 ) -> None:
     """
     Download power consumption data from Tibber API and save to CSV.
     """
-    # Load config (from env var or .env file)
-    access_token: str | SecretStr | None = None
+    # Get token from env var, CLI, or prompt
+    access_token: SecretStr | None = None
     try:
         config = TibberConfig()
         access_token = config.access_token
     except Exception:
         pass
 
-    # CLI token takes precedence
     if token:
         access_token = SecretStr(token)
 
-    # Prompt for token if still not available
     if not access_token:
-        prompted = typer.prompt("Enter your Tibber access token", hide_input=True)
-        access_token = SecretStr(prompted)
+        access_token = SecretStr(typer.prompt("Enter your Tibber access token", hide_input=True))
 
     # Initialize API client
     api = TibberAPI(access_token)
@@ -128,26 +125,23 @@ def list_homes(
         None,
         "--token",
         "-t",
-        help="Tibber access token (or set TIBBER_ACCESS_TOKEN env var)",
+        help="Tibber access token",
     ),
 ) -> None:
     """List all homes associated with your Tibber account."""
-    # Load config (from env var or .env file)
-    access_token: str | SecretStr | None = None
+    # Get token from env var, CLI, or prompt
+    access_token: SecretStr | None = None
     try:
         config = TibberConfig()
         access_token = config.access_token
     except Exception:
         pass
 
-    # CLI token takes precedence
     if token:
         access_token = SecretStr(token)
 
-    # Prompt for token if still not available
     if not access_token:
-        prompted = typer.prompt("Enter your Tibber access token", hide_input=True)
-        access_token = SecretStr(prompted)
+        access_token = SecretStr(typer.prompt("Enter your Tibber access token", hide_input=True))
 
     api = TibberAPI(access_token)
     homes = api.get_homes()

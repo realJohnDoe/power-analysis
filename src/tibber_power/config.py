@@ -1,15 +1,11 @@
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 class TibberConfig(BaseSettings):
     """Configuration for Tibber API access."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="TIBBER_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-    )
+    model_config = SettingsConfigDict(env_prefix="TIBBER_")
 
     access_token: SecretStr
 
