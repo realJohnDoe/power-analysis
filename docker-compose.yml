@@ -11,6 +11,6 @@ services:
       - TIBBER_OUTPUT_CSV_PATH=/data/tibber_pulse.csv
     volumes:
       # Mount Synology NAS folder for CSV output
-      - /docker/power-analysis/data:/data
-    command: ["tibber-power", "stream"]
+      - /volume1/docker/power-analysis/data:/data
+    command: ["tibber-power"]
     restart: unless-stopped
