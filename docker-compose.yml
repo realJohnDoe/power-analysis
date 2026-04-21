@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  tibber-power:
+    build: .
+    container_name: tibber-power
+    environment:
+      # Required: Your Tibber access token from https://developer.tibber.com/
+      - TIBBER_ACCESS_TOKEN=${TIBBER_ACCESS_TOKEN}
+      # Optional: Custom output CSV path inside container (default: /data/tibber_pulse.csv)
+      - TIBBER_OUTPUT_CSV_PATH=/data/tibber_pulse.csv
+    volumes:
+      # Mount Synology NAS folder for CSV output
+      - /docker/power-analysis/data:/data
+    command: ["tibber-power", "stream"]
+    restart: unless-stopped
