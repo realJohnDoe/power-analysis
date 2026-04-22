@@ -5,9 +5,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TibberConfig(BaseSettings):
-    """Configuration for Tibber API access."""
+    """Configuration for Tibber API access.
+    
+    Reads from environment variables (TIBBER_* prefix) and .env file.
+    """
 
-    model_config = SettingsConfigDict(env_prefix="TIBBER_")
+    model_config = SettingsConfigDict(
+        env_prefix="TIBBER_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
     access_token: SecretStr
     output_csv_path: Path = Path.home() / "Desktop" / "tibber_pulse_stream.csv"

@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,6 +21,23 @@ WEBSOCKET_URL_QUERY = """
   }
 }
 """
+
+
+def get_monthly_csv_path(base_path: Path) -> Path:
+    """Generate a monthly CSV path based on current date.
+    
+    If base_path is /data/tibber_pulse.csv, returns /data/tibber_pulse_2024-01.csv
+    """
+    now = datetime.now()
+    month_str = now.strftime("%Y-%m")
+    
+    # Insert month before the extension
+    if base_path.suffix:
+        stem = base_path.stem
+        suffix = base_path.suffix
+        return base_path.parent / f"{stem}_{month_str}{suffix}"
+    else:
+        return base_path.parent / f"{base_path.name}_{month_str}.csv"
 
 
 def make_subscription(home_id: str):
@@ -60,7 +78,7 @@ class PulseReading:
 
 
 class PulseCollector:
-    """Collects Pulse data via WebSocket and saves to CSV."""
+    """Collects Pulse data via WebSocket and saves to monthly CSV files."""
 
     def __init__(
         self,
@@ -71,10 +89,21 @@ class PulseCollector:
     ):
         self.access_token = access_token
         self.home_id = home_id
-        self.output_file = Path(output_file)
+        self.base_output_path = Path(output_file)
         self.on_reading = on_reading
         self.readings: list[PulseReading] = []
         self._stop_event = asyncio.Event()
+        self._current_month: str = datetime.now().strftime("%Y-%m")
+
+    @property
+    def output_file(self) -> Path:
+        """Get the current month's output file path."""
+        current_month = datetime.now().strftime("%Y-%m")
+        if current_month != self._current_month:
+            # Month has changed, start new file
+            self._current_month = current_month
+            self.readings = []  # Start fresh for new month
+        return get_monthly_csv_path(self.base_output_path)
 
     async def run(self, duration_seconds: float | None = None):
         """Start collecting data."""

@@ -4,13 +4,13 @@ services:
   tibber-power:
     build: .
     container_name: tibber-power
-    environment:
-      # Required: Your Tibber access token from https://developer.tibber.com/
-      - TIBBER_ACCESS_TOKEN=${TIBBER_ACCESS_TOKEN}
-      # Optional: Custom output CSV path inside container (default: /data/tibber_pulse.csv)
-      - TIBBER_OUTPUT_CSV_PATH=/data/tibber_pulse.csv
+    env_file:
+      # Mount .env file for configuration
+      - .env
     volumes:
       # Mount Synology NAS folder for CSV output
-      - /volume1/docker/power-analysis/data:/data
+      # Monthly files will be created like: tibber_pulse_2024-01.csv
+      - /volume1/docker/tibber:/data
+    # Run stream command - streams for 24 hours then restarts
     command: ["tibber-power"]
     restart: unless-stopped
