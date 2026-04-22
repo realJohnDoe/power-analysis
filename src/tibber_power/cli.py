@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from pydantic import SecretStr
 
 from tibber_power.api import TibberAPI
 from tibber_power.config import TibberConfig
@@ -39,35 +38,27 @@ def stream(
         "-h",
         help="Home ID (auto-detected if not specified)",
     ),
-    token: Optional[str] = typer.Option(
-        None,
-        "--token",
-        "-t",
-        help="Tibber access token (or set TIBBER_ACCESS_TOKEN env var)",
-    ),
 ) -> None:
     """Stream real-time data from Tibber Pulse via WebSocket."""
     # Load config
-    try:
-        config = TibberConfig()
-    except Exception:
-        config = None
+    config = TibberConfig()
 
-    # Get token from CLI, env var, or prompt
-    if token:
-        access_token = SecretStr(token)
-    elif config:
-        access_token = config.access_token
-    else:
-        access_token = SecretStr(typer.prompt("Enter your Tibber access token", hide_input=True))
+    # Validate token is set
+    if config.access_token is None:
+        typer.echo(
+            "Error: TIBBER_ACCESS_TOKEN not set.\n"
+            "Create a .env file with TIBBER_ACCESS_TOKEN=your-token or set the environment variable.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     # Get output path from CLI, env var, or default
-    output_path = get_output_path(config, output) if config else (output or Path.home() / "Desktop" / "tibber_pulse_stream.csv")
+    output_path = get_output_path(config, output)
 
     # Get home ID if not provided
     if not home_id:
         typer.echo("Fetching homes...")
-        api = TibberAPI(access_token)
+        api = TibberAPI(config.access_token)
         homes = api.get_homes()
         if not homes:
             typer.echo("Error: No homes found for this account.", err=True)
@@ -81,7 +72,7 @@ def stream(
     typer.echo(f"Data will be saved to: {output_path}")
 
     collector = PulseCollector(
-        access_token=access_token,
+        access_token=config.access_token,
         home_id=home_id,
         output_file=output_path,
         on_reading=lambda r: typer.echo(
