@@ -91,11 +91,11 @@ def stream(
 
 @app.command()
 def plot(
-    input_file: Path = typer.Argument(
+    input_path: Path = typer.Argument(
         ...,
-        help="Input CSV file to analyze",
+        help="Input CSV file or directory containing CSV files to analyze",
         exists=True,
-        dir_okay=False,
+        dir_okay=True,
         readable=True,
     ),
     output: Path = typer.Option(
@@ -117,8 +117,9 @@ def plot(
         help="Number of power bins for the histogram",
     ),
 ) -> None:
-    """Generate a 2D histogram plot from a CSV data file.
+    """Generate a 2D histogram plot from CSV data.
 
+    Accepts a single CSV file or a directory of CSV files (e.g., multiple months).
     Creates a heatmap showing power consumption patterns:
     - X-axis: Time of day (24 hours in 15-minute bins)
     - Y-axis: Net power consumption (kW)
@@ -126,7 +127,7 @@ def plot(
     """
     try:
         create_2d_histogram(
-            csv_path=input_file,
+            csv_path=input_path,
             output_path=output,
             max_power=max_power,
             power_bins=power_bins,
