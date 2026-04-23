@@ -102,7 +102,7 @@ def plot(
         None,
         "--output",
         "-o",
-        help="Output image file path (e.g., plot.png). Displays plot if not set.",
+        help="Output HTML file path (e.g., plot.html). Opens in browser if not set.",
     ),
     max_power: float = typer.Option(
         None,
