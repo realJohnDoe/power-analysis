@@ -17,7 +17,7 @@ class TibberConfig(BaseSettings):
     )
 
     access_token: SecretStr | None = None
-    output_csv_path: Path = Path.home() / "Desktop" / "tibber_pulse_stream.csv"
+    output_csv_path: Path = Path("/data/tibber_pulse_stream.csv")
 
     def get_token(self) -> str:
         """Get the decrypted access token."""
