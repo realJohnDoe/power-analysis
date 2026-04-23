@@ -117,7 +117,7 @@ def create_2d_histogram(
         z=histogram,
         x=list(range(96)),
         y=power_bin_centers,
-        colorscale="YlOrRd",
+        colorscale="Cividis",
         colorbar=dict(
             title=dict(
                 text="Days Exceeding<br>Threshold",
