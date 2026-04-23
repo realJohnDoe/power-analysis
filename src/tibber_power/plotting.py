@@ -33,6 +33,38 @@ def compute_power_from_accumulated(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def load_csv_data(csv_path: Path) -> pd.DataFrame:
+    """Load CSV data from a file or directory of CSV files.
+
+    Args:
+        csv_path: Path to a CSV file or directory containing CSV files
+
+    Returns:
+        Combined DataFrame with all data
+    """
+    csv_path = Path(csv_path)
+
+    if csv_path.is_file():
+        if csv_path.suffix.lower() != ".csv":
+            raise ValueError(f"File must be a CSV: {csv_path}")
+        return pd.read_csv(csv_path)
+
+    elif csv_path.is_dir():
+        csv_files = list(csv_path.glob("*.csv"))
+        if not csv_files:
+            raise ValueError(f"No CSV files found in directory: {csv_path}")
+
+        print(f"Found {len(csv_files)} CSV file(s) in {csv_path}")
+        dfs = []
+        for f in sorted(csv_files):
+            print(f"  Loading: {f.name}")
+            dfs.append(pd.read_csv(f))
+        return pd.concat(dfs, ignore_index=True)
+
+    else:
+        raise ValueError(f"Path does not exist: {csv_path}")
+
+
 def create_2d_histogram(
     csv_path: Path,
     output_path: Path | None = None,
@@ -47,7 +79,7 @@ def create_2d_histogram(
     - Color: Number of days where that power level was exceeded at that time
 
     Args:
-        csv_path: Path to the CSV file with Tibber data
+        csv_path: Path to a CSV file or directory containing CSV files with Tibber data
         output_path: Where to save the plot (HTML file). Opens in browser if not set.
         max_power: Maximum power value for y-axis (auto-detected if None)
         power_bins: Number of bins for the power axis
@@ -55,8 +87,8 @@ def create_2d_histogram(
     Returns:
         Path to the saved plot
     """
-    # Load and process data
-    df = pd.read_csv(csv_path)
+    # Load data from file or directory
+    df = load_csv_data(csv_path)
 
     if len(df) < 2:
         raise ValueError("Need at least 2 data points to compute power")
@@ -162,6 +194,7 @@ def create_2d_histogram(
         width=1200,
         height=700,
         margin=dict(l=80, r=150, t=100, b=80),
+        hovermode="closest",
     )
 
     # Add annotation
