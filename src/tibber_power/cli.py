@@ -6,6 +6,7 @@ import typer
 
 from tibber_power.api import TibberAPI
 from tibber_power.config import TibberConfig
+from tibber_power.plotting import create_2d_histogram
 from tibber_power.websocket import PulseCollector
 
 app = typer.Typer(help="Tibber Pulse data streaming tool")
@@ -86,6 +87,57 @@ def stream(
         typer.echo("\nStream stopped by user")
     finally:
         typer.echo(f"Data saved to: {output_path}")
+
+
+@app.command()
+def plot(
+    input_file: Path = typer.Argument(
+        ...,
+        help="Input CSV file to analyze",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+    ),
+    output: Path = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output image file path (e.g., plot.png). Displays plot if not set.",
+    ),
+    max_power: float = typer.Option(
+        None,
+        "--max-power",
+        "-m",
+        help="Maximum power for Y-axis (auto-detected if not set)",
+    ),
+    power_bins: int = typer.Option(
+        50,
+        "--power-bins",
+        "-b",
+        help="Number of power bins for the histogram",
+    ),
+) -> None:
+    """Generate a 2D histogram plot from a CSV data file.
+
+    Creates a heatmap showing power consumption patterns:
+    - X-axis: Time of day (24 hours in 15-minute bins)
+    - Y-axis: Net power consumption (kW)
+    - Color: Number of days where power exceeded threshold at that time
+    """
+    try:
+        create_2d_histogram(
+            csv_path=input_file,
+            output_path=output,
+            max_power=max_power,
+            power_bins=power_bins,
+        )
+        if output:
+            typer.echo(f"Plot saved to: {output}")
+        else:
+            typer.echo("Plot displayed.")
+    except Exception as e:
+        typer.echo(f"Error generating plot: {e}", err=True)
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
