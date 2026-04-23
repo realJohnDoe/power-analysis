@@ -103,9 +103,14 @@ def create_2d_histogram(
             days_exceeding = (time_data["net_power"] > threshold).sum()
             histogram[power_idx, time_idx] = days_exceeding
 
-    # Create time labels for x-axis (every 2 hours)
-    time_labels = [f"{h:02d}:00" for h in range(0, 24)]
+    # Create time labels for all 15-minute bins (96 labels)
+    time_labels_all = []
+    for h in range(24):
+        for m in [0, 15, 30, 45]:
+            time_labels_all.append(f"{h:02d}:{m:02d}")
+    # X-axis shows every hour
     time_label_positions = list(range(0, 96, 4))
+    time_labels_hourly = [time_labels_all[i] for i in time_label_positions]  # For x-axis ticks (every hour)
 
     # Create the heatmap with Plotly
     fig = go.Figure(data=go.Heatmap(
@@ -125,7 +130,7 @@ def create_2d_histogram(
             "Days exceeding: %{z}<br>" +
             "<extra></extra>"
         ),
-        customdata=[[time_labels[i // 4] if i % 4 == 0 else "" for i in range(96)] for _ in range(power_bins)],
+        customdata=[time_labels_all for _ in range(power_bins)],
     ))
 
     # Update layout
@@ -142,7 +147,7 @@ def create_2d_histogram(
             title="Time of Day",
             tickmode="array",
             tickvals=time_label_positions,
-            ticktext=time_labels,
+            ticktext=time_labels_hourly,
             tickangle=-45,
             showgrid=True,
             gridcolor="rgba(128,128,128,0.2)",
