@@ -132,11 +132,13 @@ class PulseCollector:
         print(f"WebSocket URL: {ws_url}")
         
         # Step 2: Create WebSocket transport with token in init_payload
+        # Disable pong timeout as Tibber API doesn't always respond to pings
         transport = WebsocketsTransport(
             url=ws_url,
             init_payload={"token": token},
             headers={"User-Agent": "tibber-power-cli/0.1.0"},
-            ping_interval=30,
+            ping_interval=60,
+            pong_timeout=None,
         )
 
         # Create client
@@ -179,13 +181,18 @@ class PulseCollector:
             print(f"Saved {len(self.readings)} readings to {self.output_file}")
 
     def _save(self):
-        """Save readings to CSV."""
+        """Save readings to CSV, appending if file exists."""
         if not self.readings:
             return
         
         self.output_file.parent.mkdir(parents=True, exist_ok=True)
         df = pd.DataFrame([r.to_dict() for r in self.readings])
-        df.to_csv(self.output_file, index=False)
+        
+        # Append if file exists, otherwise create new
+        if self.output_file.exists():
+            df.to_csv(self.output_file, index=False, mode='a', header=False)
+        else:
+            df.to_csv(self.output_file, index=False)
 
     async def _stop_after(self, seconds: float):
         """Stop collection after specified duration."""
