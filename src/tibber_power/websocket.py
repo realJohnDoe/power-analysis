@@ -94,6 +94,8 @@ class PulseCollector:
         self.readings: list[PulseReading] = []
         self._stop_event = asyncio.Event()
         self._current_month: str = datetime.now().strftime("%Y-%m")
+        self._last_data_received: datetime | None = None
+        self._reconnect_delay: float = 1.0  # Start with 1 second, exponential backoff
 
     @property
     def output_file(self) -> Path:
@@ -105,12 +107,71 @@ class PulseCollector:
             self.readings = []  # Start fresh for new month
         return get_monthly_csv_path(self.base_output_path)
 
+    async def _watchdog(self):
+        """Monitor connection health and trigger reconnect if no data for 10 minutes."""
+        timeout_seconds = 600  # 10 minutes
+        
+        while not self._stop_event.is_set():
+            await asyncio.sleep(60)  # Check every minute
+            
+            if self._stop_event.is_set():
+                break
+                
+            if self._last_data_received is not None:
+                elapsed = (datetime.now() - self._last_data_received).total_seconds()
+                if elapsed > timeout_seconds:
+                    print(f"\n⚠️  No data received for {elapsed:.0f}s - connection may be stale")
+                    print("Triggering reconnect...")
+                    # Signal that we need to reconnect
+                    self._reconnect_event.set()
+                    break
+
     async def run(self, duration_seconds: float | None = None):
-        """Start collecting data."""
+        """Start collecting data with automatic reconnect logic."""
         token = self.access_token.get_secret_value()
         
+        # Start duration timer if specified
+        if duration_seconds:
+            asyncio.create_task(self._stop_after(duration_seconds))
+
+        print(f"Connecting to Pulse stream for home {self.home_id}...")
+        print(f"Saving data to: {self.output_file}")
+        
+        # Reconnect loop
+        max_reconnect_delay = 300  # Max 5 minutes between reconnects
+        reconnect_attempts = 0
+        
+        while not self._stop_event.is_set():
+            try:
+                await self._connect_and_stream(token, duration_seconds)
+                
+                # If we get here without exception, it was a clean stop
+                if not self._stop_event.is_set():
+                    print("Stream ended unexpectedly, reconnecting...")
+                else:
+                    break
+                    
+            except Exception as e:
+                if self._stop_event.is_set():
+                    break
+                print(f"\nConnection error: {e}")
+                
+            # Exponential backoff for reconnect
+            reconnect_attempts += 1
+            delay = min(self._reconnect_delay * (2 ** (reconnect_attempts - 1)), max_reconnect_delay)
+            # Add jitter to avoid thundering herd
+            delay = delay * (0.5 + 0.5 * (asyncio.get_event_loop().time() % 1))
+            
+            print(f"Reconnecting in {delay:.1f}s (attempt {reconnect_attempts})...")
+            await asyncio.sleep(delay)
+        
+        self._save()
+        print(f"Saved {len(self.readings)} readings to {self.output_file}")
+
+    async def _connect_and_stream(self, token: str, duration_seconds: float | None = None):
+        """Establish connection and stream data."""
         # Step 1: Fetch dynamic WebSocket URL via HTTP
-        print("Fetching WebSocket URL...")
+        print("\nFetching WebSocket URL...")
         headers = {
             "Authorization": f"Bearer {token}",
             "User-Agent": "tibber-power-cli/0.1.0",
@@ -131,8 +192,7 @@ class PulseCollector:
         ws_url = data["data"]["viewer"]["websocketSubscriptionUrl"]
         print(f"WebSocket URL: {ws_url}")
         
-        # Step 2: Create WebSocket transport with token in init_payload
-        # Disable pong timeout as Tibber API doesn't always respond to pings
+        # Step 2: Create WebSocket transport
         transport = WebsocketsTransport(
             url=ws_url,
             init_payload={"token": token},
@@ -143,22 +203,26 @@ class PulseCollector:
 
         # Create client
         client = Client(transport=transport, fetch_schema_from_transport=False)
-
-        # Start duration timer if specified
-        if duration_seconds:
-            asyncio.create_task(self._stop_after(duration_seconds))
-
-        print(f"Connecting to Pulse stream for home {self.home_id}...")
-        print(f"Saving data to: {self.output_file}")
         
+        # Create reconnect event for this connection
+        self._reconnect_event = asyncio.Event()
+
+        # Start watchdog
+        watchdog_task = asyncio.create_task(self._watchdog())
+
         try:
-            # Subscribe and process results (home_id embedded in query)
+            # Subscribe and process results
             subscription = make_subscription(self.home_id)
             
             async with client as session:
                 print("Connected! Waiting for data (updates every 1-2 minutes)...")
                 
                 async for result in session.subscribe(subscription):
+                    # Check if reconnect was triggered
+                    if self._reconnect_event.is_set():
+                        print("Reconnect triggered by watchdog")
+                        break
+                        
                     if self._stop_event.is_set():
                         break
 
@@ -167,18 +231,25 @@ class PulseCollector:
                         reading = PulseReading.from_dict(data)
                         self.readings.append(reading)
                         self._save()
+                        self._last_data_received = datetime.now()
+                        self._reconnect_delay = 1.0  # Reset backoff on successful data
                         
                         if self.on_reading:
                             self.on_reading(reading)
 
         except KeyboardInterrupt:
             print("\nStopping collector...")
+            self._stop_event.set()
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Stream error: {e}")
             raise
         finally:
+            watchdog_task.cancel()
+            try:
+                await watchdog_task
+            except asyncio.CancelledError:
+                pass
             self._save()
-            print(f"Saved {len(self.readings)} readings to {self.output_file}")
 
     def _save(self):
         """Save readings to CSV, appending if file exists."""
