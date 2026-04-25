@@ -90,6 +90,51 @@ def stream(
 
 
 @app.command()
+def deduplicate(
+    input_path: Path = typer.Argument(
+        ...,
+        help="Input CSV file to deduplicate",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+    ),
+    output: Path = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output CSV file path (default: overwrites input file)",
+    ),
+) -> None:
+    """Remove duplicate rows from a CSV file based on timestamp."""
+    import pandas as pd
+
+    typer.echo(f"Reading {input_path}...")
+    df = pd.read_csv(input_path)
+
+    initial_count = len(df)
+    typer.echo(f"Initial rows: {initial_count}")
+
+    # Remove duplicates based on timestamp column
+    if "timestamp" in df.columns:
+        df = df.drop_duplicates(subset=["timestamp"], keep="first")
+    else:
+        # Fallback: drop duplicates based on all columns
+        df = df.drop_duplicates(keep="first")
+
+    final_count = len(df)
+    removed = initial_count - final_count
+
+    # Save result
+    output_path = output or input_path
+    df.to_csv(output_path, index=False)
+
+    typer.echo(f"Removed {removed} duplicate rows")
+    typer.echo(f"Final rows: {final_count}")
+    typer.echo(f"Saved to: {output_path}")
+
+
+@app.command()
 def plot(
     input_path: Path = typer.Argument(
         ...,

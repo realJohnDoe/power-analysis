@@ -264,6 +264,9 @@ class PulseCollector:
             df.to_csv(self.output_file, index=False, mode='a', header=False)
         else:
             df.to_csv(self.output_file, index=False)
+        
+        # Clear readings after saving to prevent duplicates on reconnect
+        self.readings = []
 
     async def _stop_after(self, seconds: float):
         """Stop collection after specified duration."""
