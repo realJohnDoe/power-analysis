@@ -12,5 +12,5 @@ services:
       # Monthly files will be created like: tibber_pulse_2024-01.csv
       - /volume1/docker/power-analysis/data:/data
     # Run stream command - streams for 24 hours then restarts
-    command: ["tibber-power", "--output", "/data/tibber_pulse_stream.csv"]
+    command: ["tibber-power", "stream"]
     restart: unless-stopped

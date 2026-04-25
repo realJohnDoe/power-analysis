@@ -68,6 +68,7 @@ def load_csv_data(csv_path: Path) -> pd.DataFrame:
 def create_2d_histogram(
     csv_path: Path,
     output_path: Path | None = None,
+    min_power: float | None = 1.0,
     max_power: float | None = None,
     power_bins: int = 50,
 ) -> Path:
@@ -76,11 +77,12 @@ def create_2d_histogram(
     The histogram shows:
     - X-axis: Time of day in 15-minute bins (96 bins for 24 hours)
     - Y-axis: Net power consumption (kW)
-    - Color: Number of days where that power level was exceeded at that time
+    - Color: Number of days where power level was exceeded at that time
 
     Args:
         csv_path: Path to a CSV file or directory containing CSV files with Tibber data
         output_path: Where to save the plot (HTML file). Opens in browser if not set.
+        min_power: Minimum power value for y-axis (default: 1.0 kW)
         max_power: Maximum power value for y-axis (auto-detected if None)
         power_bins: Number of bins for the power axis
 
@@ -110,7 +112,8 @@ def create_2d_histogram(
     # Determine power range
     if max_power is None:
         max_power = df["net_power"].quantile(0.99)  # Use 99th percentile to exclude outliers
-    min_power = max(-5, df["net_power"].min())  # Cap at -5 kW for visual clarity
+    if min_power is None:
+        min_power = max(-5, df["net_power"].min())  # Cap at -5 kW for visual clarity
 
     # Create bins
     power_bin_edges = np.linspace(min_power, max_power, power_bins + 1)

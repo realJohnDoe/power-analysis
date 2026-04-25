@@ -149,6 +149,11 @@ def plot(
         "-o",
         help="Output HTML file path (e.g., plot.html). Opens in browser if not set.",
     ),
+    min_power: float = typer.Option(
+        -1.0,
+        "--min-power",
+        help="Minimum power for Y-axis in kW (default: -1.0)",
+    ),
     max_power: float = typer.Option(
         None,
         "--max-power",
@@ -174,6 +179,7 @@ def plot(
         create_2d_histogram(
             csv_path=input_path,
             output_path=output,
+            min_power=min_power,
             max_power=max_power,
             power_bins=power_bins,
         )
