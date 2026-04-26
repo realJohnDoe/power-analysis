@@ -7,6 +7,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from tibber_power.battery_correction import apply_correction, get_default_profile
+
 
 def compute_power_from_accumulated(df: pd.DataFrame) -> pd.DataFrame:
     """Compute instantaneous power (kW) from accumulated consumption/production.
@@ -95,8 +97,11 @@ def create_2d_histogram(
     if len(df) < 2:
         raise ValueError("Need at least 2 data points to compute power")
 
-    # Compute power values
+    # Compute power from accumulated data
     df = compute_power_from_accumulated(df)
+
+    # Apply battery correction
+    df = apply_correction(df, profile=get_default_profile())
 
     # Extract time components
     df["hour"] = df["timestamp"].dt.hour
@@ -109,11 +114,12 @@ def create_2d_histogram(
     # Get unique days for counting
     unique_days = df["date"].nunique()
 
-    # Determine power range
+    # Determine power range (use corrected net power if available)
+    power_col = "net_power_corrected" if "net_power_corrected" in df.columns else "net_power"
     if max_power is None:
-        max_power = df["net_power"].quantile(0.99)  # Use 99th percentile to exclude outliers
+        max_power = df[power_col].quantile(0.99)  # Use 99th percentile to exclude outliers
     if min_power is None:
-        min_power = max(-5, df["net_power"].min())  # Cap at -5 kW for visual clarity
+        min_power = max(-5, df[power_col].min())  # Cap at -5 kW for visual clarity
 
     # Create bins
     power_bin_edges = np.linspace(min_power, max_power, power_bins + 1)
@@ -123,7 +129,7 @@ def create_2d_histogram(
     histogram = np.zeros((power_bins, 96))
 
     # Group by date and time bin to get max power for each (day, time_bin) combination
-    daily_max_power = df.groupby(["date", "time_bin"])["net_power"].max().reset_index()
+    daily_max_power = df.groupby(["date", "time_bin"])[power_col].max().reset_index()
 
     # For each time bin and power threshold, count days exceeding that power
     for time_idx in range(96):
@@ -135,7 +141,7 @@ def create_2d_histogram(
         for power_idx in range(power_bins):
             threshold = power_bin_edges[power_idx + 1]
             # Count days where max power at this time exceeded the threshold
-            days_exceeding = (time_data["net_power"] > threshold).sum()
+            days_exceeding = (time_data[power_col] > threshold).sum()
             histogram[power_idx, time_idx] = days_exceeding
 
     # Create time labels for all 15-minute bins (96 labels)
