@@ -181,10 +181,13 @@ def create_2d_histogram(
     time_labels_hourly = [time_labels_all[i] for i in time_label_positions]  # For x-axis ticks (every hour)
 
     # Create the heatmap with Plotly
+    # Use lower bin edges for y-axis so hover shows lower limit of bin
+    power_bin_lower_edges = power_bin_edges[:-1]
+
     fig = go.Figure(data=go.Heatmap(
         z=histogram,
-        x=list(range(96)),
-        y=power_bin_centers,
+        x=list(range(time_bins_per_day)),
+        y=power_bin_lower_edges,
         colorscale="Cividis",
         colorbar=dict(
             title=dict(
