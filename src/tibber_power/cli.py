@@ -166,14 +166,20 @@ def plot(
         "-b",
         help="Number of power bins for the histogram",
     ),
+    time_bins: int = typer.Option(
+        96,
+        "--time-bins",
+        "-t",
+        help="Number of time bins per day (default: 96 = 15-minute intervals)",
+    ),
 ) -> None:
     """Generate a 2D histogram plot from CSV data.
 
     Accepts a single CSV file or a directory of CSV files (e.g., multiple months).
     Creates a heatmap showing power consumption patterns:
-    - X-axis: Time of day (24 hours in 15-minute bins)
-    - Y-axis: Net power consumption (kW)
-    - Color: Number of days where power exceeded threshold at that time
+    - X-axis: Time of day (24 hours in configurable bins)
+    - Y-axis: Net energy consumption (kWh)
+    - Color: Number of days where energy exceeded threshold at that time
     """
     try:
         create_2d_histogram(
@@ -182,6 +188,7 @@ def plot(
             min_power=min_power,
             max_power=max_power,
             power_bins=power_bins,
+            time_bins_per_day=time_bins,
         )
         if output:
             typer.echo(f"Plot saved to: {output}")
