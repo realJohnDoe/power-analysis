@@ -160,11 +160,11 @@ def plot(
         "-m",
         help="Maximum power for Y-axis (auto-detected if not set)",
     ),
-    power_bins: int = typer.Option(
-        50,
-        "--power-bins",
+    bin_size: float = typer.Option(
+        0.1,
+        "--bin-size",
         "-b",
-        help="Number of power bins for the histogram",
+        help="Size of each energy bin in kWh (default: 0.1)",
     ),
     time_bins: int = typer.Option(
         96,
@@ -187,7 +187,7 @@ def plot(
             output_path=output,
             min_power=min_power,
             max_power=max_power,
-            power_bins=power_bins,
+            bin_size=bin_size,
             time_bins_per_day=time_bins,
         )
         if output:

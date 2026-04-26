@@ -86,7 +86,7 @@ def create_2d_histogram(
     output_path: Path | None,
     min_power: float | None,
     max_power: float | None,
-    power_bins: int,
+    bin_size: float,
     time_bins_per_day: int,
 ) -> Path:
     """Create an interactive 2D histogram of power consumption patterns using Plotly.
@@ -99,10 +99,10 @@ def create_2d_histogram(
     Args:
         csv_path: Path to a CSV file or directory containing CSV files with Tibber data
         output_path: Where to save the plot (HTML file). Opens in browser if not set.
-        min_power: Minimum energy value for y-axis (default: 1.0 kWh)
+        min_power: Minimum energy value for y-axis
         max_power: Maximum energy value for y-axis (auto-detected if None)
-        power_bins: Number of bins for the energy axis
-        time_bins_per_day: Number of time bins per day (default 96 = 15-minute intervals)
+        bin_size: Size of each energy bin in kWh
+        time_bins_per_day: Number of time bins per day
 
     Returns:
         Path to the saved plot
@@ -138,8 +138,17 @@ def create_2d_histogram(
     if min_power is None:
         min_power = max(-1, df[energy_col].min())  # Cap at -1 kWh for visual clarity
 
-    # Create bins
-    power_bin_edges = np.linspace(min_power, max_power, power_bins + 1)
+    # Create bins with 0 as a boundary: ..., [-0.2,-0.1), [-0.1,0), [0,0.1), [0.1,0.2), ...
+    # Calculate how many bins needed below and above 0
+    bins_below_zero = int(np.ceil(-min_power / bin_size)) if min_power < 0 else 0
+    bins_above_zero = int(np.ceil(max_power / bin_size)) if max_power > 0 else 0
+
+    # Create edges: negative bins (descending), then 0, then positive bins
+    negative_edges = np.arange(-bins_below_zero, 0) * bin_size if bins_below_zero > 0 else np.array([])
+    positive_edges = np.arange(0, bins_above_zero + 1) * bin_size if bins_above_zero > 0 else np.array([0.0])
+
+    power_bin_edges = np.concatenate([negative_edges, positive_edges])
+    power_bins = len(power_bin_edges) - 1
     power_bin_centers = (power_bin_edges[:-1] + power_bin_edges[1:]) / 2
 
     # Initialize 2D histogram: count of days where energy exceeded threshold
