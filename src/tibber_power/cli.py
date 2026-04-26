@@ -150,9 +150,9 @@ def plot(
         help="Output HTML file path (e.g., plot.html). Opens in browser if not set.",
     ),
     min_power: float = typer.Option(
-        -1.0,
+        -0.2,
         "--min-power",
-        help="Minimum power for Y-axis in kW (default: -1.0)",
+        help="Minimum energy for Y-axis in kWh (default: -0.2)",
     ),
     max_power: float = typer.Option(
         None,

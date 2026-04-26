@@ -8,31 +8,35 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from tibber_power.battery_correction import apply_correction, get_default_profile
+from tibber_power.resample import resample_power
 
 
 def compute_power_from_accumulated(df: pd.DataFrame) -> pd.DataFrame:
     """Compute instantaneous power (kW) from accumulated consumption/production.
 
-    Power is calculated as the difference in accumulated energy divided by time difference.
+    Uses resampling with midnight anchor points to handle daily resets properly.
     """
+    # Rename columns to match resample module expectations
     df = df.copy()
     df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df = df.sort_values("timestamp").reset_index(drop=True)
 
-    # Calculate time differences in hours
-    df["time_diff_hours"] = df["timestamp"].diff().dt.total_seconds() / 3600
+    # Map Tibber column names to resample module names
+    if "accumulated_consumption" in df.columns:
+        df["cum_consumption"] = df["accumulated_consumption"]
+    if "accumulated_production" in df.columns:
+        df["cum_production"] = df["accumulated_production"]
 
-    # Calculate power from consumption and production
-    df["consumption_power"] = df["accumulated_consumption"].diff() / df["time_diff_hours"]
-    df["production_power"] = df["accumulated_production"].diff() / df["time_diff_hours"]
+    # Use resampling with 15-minute intervals (interpolates across gaps)
+    resampled = resample_power(df, interval_minutes=15)
 
-    # Net power = consumption - production (positive = consuming from grid)
-    df["net_power"] = df["consumption_power"] - df["production_power"]
+    # Use energy consumed in interval (kWh) instead of power (kW)
+    # net_production_kwh is already the energy per interval
+    resampled["net_energy_kwh"] = resampled["net_production_kwh"]
 
-    # Remove rows with invalid calculations (first row, or where time_diff is 0)
-    df = df[df["time_diff_hours"] > 0].copy()
+    # For compatibility with existing code, map interval_start to timestamp
+    resampled["timestamp"] = resampled["interval_start"]
 
-    return df
+    return resampled
 
 
 def load_csv_data(csv_path: Path) -> pd.DataFrame:
@@ -114,12 +118,12 @@ def create_2d_histogram(
     # Get unique days for counting
     unique_days = df["date"].nunique()
 
-    # Determine power range (use corrected net power if available)
-    power_col = "net_power_corrected" if "net_power_corrected" in df.columns else "net_power"
+    # Determine energy range (use corrected net energy if available)
+    energy_col = "net_energy_kwh_corrected" if "net_energy_kwh_corrected" in df.columns else "net_energy_kwh"
     if max_power is None:
-        max_power = df[power_col].quantile(0.99)  # Use 99th percentile to exclude outliers
+        max_power = df[energy_col].quantile(0.99)  # Use 99th percentile to exclude outliers
     if min_power is None:
-        min_power = max(-5, df[power_col].min())  # Cap at -5 kW for visual clarity
+        min_power = max(-1, df[energy_col].min())  # Cap at -1 kWh for visual clarity
 
     # Create bins
     power_bin_edges = np.linspace(min_power, max_power, power_bins + 1)
@@ -128,12 +132,12 @@ def create_2d_histogram(
     # Initialize 2D histogram: count of days where power exceeded threshold
     histogram = np.zeros((power_bins, 96))
 
-    # Group by date and time bin to get max power for each (day, time_bin) combination
-    daily_max_power = df.groupby(["date", "time_bin"])[power_col].max().reset_index()
+    # Group by date and time bin to get max energy for each (day, time_bin) combination
+    daily_max_energy = df.groupby(["date", "time_bin"])[energy_col].max().reset_index()
 
     # For each time bin and power threshold, count days exceeding that power
     for time_idx in range(96):
-        time_data = daily_max_power[daily_max_power["time_bin"] == time_idx]
+        time_data = daily_max_energy[daily_max_energy["time_bin"] == time_idx]
 
         if len(time_data) == 0:
             continue
@@ -141,7 +145,7 @@ def create_2d_histogram(
         for power_idx in range(power_bins):
             threshold = power_bin_edges[power_idx + 1]
             # Count days where max power at this time exceeded the threshold
-            days_exceeding = (time_data[power_col] > threshold).sum()
+            days_exceeding = (time_data[energy_col] > threshold).sum()
             histogram[power_idx, time_idx] = days_exceeding
 
     # Create time labels for all 15-minute bins (96 labels)
@@ -167,7 +171,7 @@ def create_2d_histogram(
         ),
         hovertemplate=(
             "Time: %{customdata}<br>" +
-            "Power: %{y:.2f} kW<br>" +
+            "Energy: %{y:.2f} kWh<br>" +
             "Days exceeding: %{z}<br>" +
             "<extra></extra>"
         ),
@@ -194,7 +198,7 @@ def create_2d_histogram(
             gridcolor="rgba(128,128,128,0.2)",
         ),
         yaxis=dict(
-            title="Net Power (kW)",
+            title="Net Energy (kWh)",
             showgrid=True,
             gridcolor="rgba(128,128,128,0.2)",
         ),
@@ -208,7 +212,7 @@ def create_2d_histogram(
 
     # Add annotation
     fig.add_annotation(
-        text="Color intensity shows how many days power exceeded threshold at that time",
+        text="Color intensity shows how many days energy exceeded threshold at that time",
         xref="paper",
         yref="paper",
         x=0.01,
