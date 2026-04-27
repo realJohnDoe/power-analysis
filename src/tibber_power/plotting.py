@@ -81,6 +81,46 @@ def load_csv_data(csv_path: Path) -> pd.DataFrame:
         raise ValueError(f"Path does not exist: {csv_path}")
 
 
+def calculate_percentile_curves(df: pd.DataFrame, percentiles: list[int] = [20, 40, 60, 80]) -> dict[int, pd.Series]:
+    """Calculate percentile curves for net production across time of day.
+
+    Args:
+        df: DataFrame with timestamp and net_energy_kwh columns
+        percentiles: List of percentiles to calculate (e.g., [20, 40, 60, 80])
+
+    Returns:
+        Dictionary mapping percentile to Series of values by time bin
+    """
+    # Extract time components
+    df = df.copy()
+    df["date"] = df["timestamp"].dt.date
+    df["time_bin"] = df["timestamp"].dt.hour * 4 + df["timestamp"].dt.minute // 15
+
+    # Get the energy column (corrected if available)
+    energy_col = "net_energy_kwh_corrected" if "net_energy_kwh_corrected" in df.columns else "net_energy_kwh"
+
+    # Pivot to get time bins as columns, dates as rows
+    pivot = df.pivot_table(
+        index="date",
+        columns="time_bin",
+        values=energy_col,
+        aggfunc="max"  # Use max energy in each time bin per day
+    )
+
+    curves = {}
+    # Clip values below zero before calculating percentiles
+    clipped_pivot = pivot.clip(lower=0)
+    for p in percentiles:
+        curve = pd.Series(
+            np.nanpercentile(clipped_pivot.values, p, axis=0),
+            index=clipped_pivot.columns,
+            name=f"p{p}"
+        )
+        curves[p] = curve
+
+    return curves
+
+
 def create_2d_histogram(
     csv_path: Path,
     output_path: Path | None,
@@ -240,6 +280,49 @@ def create_2d_histogram(
         height=700,
         margin=dict(l=80, r=150, t=100, b=80),
         hovermode="closest",
+    )
+
+    # Add annotation
+    # Add battery dispatch percentile curves
+    percentile_colors = {20: "rgba(255, 0, 0, 0.7)", 40: "rgba(255, 165, 0, 0.7)",
+                         60: "rgba(0, 255, 0, 0.7)", 80: "rgba(0, 0, 255, 0.7)"}
+    percentile_labels = {20: "20th percentile", 40: "40th percentile",
+                         60: "60th percentile", 80: "80th percentile"}
+
+    curves = calculate_percentile_curves(df, percentiles=[20, 40, 60, 80])
+    x_positions = [i + 0.5 for i in range(time_bins_per_day)]
+
+    for p, curve in curves.items():
+        # Ensure curve has values for all time bins
+        curve_values = [curve.get(i, np.nan) for i in range(time_bins_per_day)]
+
+        fig.add_trace(go.Scatter(
+            x=x_positions,
+            y=curve_values,
+            mode="lines",
+            name=percentile_labels[p],
+            line=dict(color=percentile_colors[p], width=2),
+            hovertemplate=(
+                f"{percentile_labels[p]}<br>" +
+                "Time: %{customdata}<br>" +
+                "Energy: %{y:.2f} kWh<br>" +
+                "<extra></extra>"
+            ),
+            customdata=time_labels_all,
+        ))
+
+    # Update layout to show legend at bottom left to avoid color scale overlap
+    fig.update_layout(
+        legend=dict(
+            title=dict(text="Dispatch Curves"),
+            x=0.01,
+            y=0.01,
+            xanchor="left",
+            yanchor="bottom",
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="gray",
+            borderwidth=1,
+        ),
     )
 
     # Add annotation
