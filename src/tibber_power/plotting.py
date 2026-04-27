@@ -175,19 +175,21 @@ def create_2d_histogram(
     for h in range(24):
         for m in range(0, 60, minutes_per_bin):
             time_labels_all.append(f"{h:02d}:{m:02d}")
-    # X-axis shows every hour (4 bins per hour at 15min resolution)
+    # X-axis labels at hour boundaries (edges), including 24:00 at the end
     bins_per_hour = 60 // minutes_per_bin
-    time_label_positions = list(range(0, time_bins_per_day, bins_per_hour))
-    time_labels_hourly = [time_labels_all[i] for i in time_label_positions]  # For x-axis ticks (every hour)
+    time_label_positions = list(range(0, time_bins_per_day + 1, bins_per_hour))
+    time_labels_hourly = [f"{h:02d}:00" for h in range(25)]  # 00:00 to 24:00
 
     # Create the heatmap with Plotly
-    # Use lower bin edges for y-axis so hover shows lower limit of bin
-    power_bin_lower_edges = power_bin_edges[:-1]
+    # Calculate cell centers so bin edges align with tick labels
+    # For x: cells span [i, i+1], so center is at i + 0.5
+    # For y: cells span [edge, edge+bin_size], so center is at edge + bin_size/2
+    power_bin_centers = power_bin_edges[:-1] + bin_size / 2
 
     fig = go.Figure(data=go.Heatmap(
         z=histogram,
-        x=list(range(time_bins_per_day)),
-        y=power_bin_lower_edges,
+        x=[i + 0.5 for i in range(time_bins_per_day)],
+        y=power_bin_centers,
         colorscale="Cividis",
         colorbar=dict(
             title=dict(
@@ -196,12 +198,13 @@ def create_2d_histogram(
             ),
         ),
         hovertemplate=(
-            "Time: %{customdata}<br>" +
-            "Energy: %{y:.2f} kWh<br>" +
+            "Time: %{customdata[0]}<br>" +
+            "Energy: %{customdata[1]:.2f} kWh<br>" +
             "Days exceeding: %{z}<br>" +
             "<extra></extra>"
         ),
-        customdata=[time_labels_all for _ in range(power_bins)],
+        # customdata: [time_label, lower_edge] for each (y_bin, x_bin) cell
+        customdata=[[[time_labels_all[x], power_bin_edges[y]] for x in range(time_bins_per_day)] for y in range(power_bins)],
     ))
 
     # Update layout
@@ -225,6 +228,9 @@ def create_2d_histogram(
         ),
         yaxis=dict(
             title="Net Energy (kWh)",
+            tickmode="array",
+            tickvals=power_bin_edges,
+            ticktext=[f"{edge:.2f}" for edge in power_bin_edges],
             showgrid=True,
             gridcolor="rgba(128,128,128,0.2)",
         ),
