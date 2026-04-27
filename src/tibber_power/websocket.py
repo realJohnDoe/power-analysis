@@ -107,7 +107,26 @@ class PulseCollector:
             self.readings = []  # Start fresh for new month
         return get_monthly_csv_path(self.base_output_path)
 
-    async def _watchdog(self):
+    async def _subscribe_loop(self, session):
+        """Main subscribe loop - runs as cancellable task."""
+        subscription = make_subscription(self.home_id)
+        
+        async for result in session.subscribe(subscription):
+            if self._stop_event.is_set():
+                break
+
+            data = result.get("liveMeasurement")
+            if data:
+                reading = PulseReading.from_dict(data)
+                self.readings.append(reading)
+                self._save()
+                self._last_data_received = datetime.now()
+                self._reconnect_delay = 1.0  # Reset backoff on successful data
+                
+                if self.on_reading:
+                    self.on_reading(reading)
+
+    async def _watchdog(self, session_task: asyncio.Task):
         """Monitor connection health and trigger reconnect if no data for 10 minutes."""
         timeout_seconds = 600  # 10 minutes
         
@@ -122,8 +141,8 @@ class PulseCollector:
                 if elapsed > timeout_seconds:
                     print(f"\n⚠️  No data received for {elapsed:.0f}s - connection may be stale")
                     print("Triggering reconnect...")
-                    # Signal that we need to reconnect
-                    self._reconnect_event.set()
+                    # Cancel the session task to force reconnect
+                    session_task.cancel()
                     break
 
     async def run(self, duration_seconds: float | None = None):
@@ -204,52 +223,38 @@ class PulseCollector:
         # Create client
         client = Client(transport=transport, fetch_schema_from_transport=False)
         
-        # Create reconnect event for this connection
-        self._reconnect_event = asyncio.Event()
-
-        # Start watchdog
-        watchdog_task = asyncio.create_task(self._watchdog())
-
-        try:
-            # Subscribe and process results
-            subscription = make_subscription(self.home_id)
+        async with client as session:
+            print("Connected! Waiting for data (updates every 1-2 minutes)...")
             
-            async with client as session:
-                print("Connected! Waiting for data (updates every 1-2 minutes)...")
-                
-                async for result in session.subscribe(subscription):
-                    # Check if reconnect was triggered
-                    if self._reconnect_event.is_set():
-                        print("Reconnect triggered by watchdog")
-                        break
-                        
-                    if self._stop_event.is_set():
-                        break
+            # Create reconnect event for this connection
+            self._reconnect_event = asyncio.Event()
+            
+            # Create a task for the subscribe loop so watchdog can cancel it
+            subscribe_task = asyncio.create_task(self._subscribe_loop(session))
+            
+            # Start watchdog, passing the subscribe task to cancel if stale
+            watchdog_task = asyncio.create_task(self._watchdog(subscribe_task))
 
-                    data = result.get("liveMeasurement")
-                    if data:
-                        reading = PulseReading.from_dict(data)
-                        self.readings.append(reading)
-                        self._save()
-                        self._last_data_received = datetime.now()
-                        self._reconnect_delay = 1.0  # Reset backoff on successful data
-                        
-                        if self.on_reading:
-                            self.on_reading(reading)
-
-        except KeyboardInterrupt:
-            print("\nStopping collector...")
-            self._stop_event.set()
-        except Exception as e:
-            print(f"Stream error: {e}")
-            raise
-        finally:
-            watchdog_task.cancel()
             try:
-                await watchdog_task
+                # Wait for subscribe loop to complete (either normally or via watchdog cancel)
+                await subscribe_task
+                
             except asyncio.CancelledError:
-                pass
-            self._save()
+                # Subscribe task was cancelled by watchdog - trigger reconnect
+                print("\nReconnect triggered by watchdog")
+            except KeyboardInterrupt:
+                print("\nStopping collector...")
+                self._stop_event.set()
+            except Exception as e:
+                print(f"Stream error: {e}")
+                raise
+            finally:
+                watchdog_task.cancel()
+                try:
+                    await watchdog_task
+                except asyncio.CancelledError:
+                    pass
+                self._save()
 
     def _save(self):
         """Save readings to CSV, appending if file exists."""
