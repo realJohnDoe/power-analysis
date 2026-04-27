@@ -81,20 +81,23 @@ def load_csv_data(csv_path: Path) -> pd.DataFrame:
         raise ValueError(f"Path does not exist: {csv_path}")
 
 
-def calculate_percentile_curves(df: pd.DataFrame, percentiles: list[int] = [20, 40, 60, 80]) -> dict[int, pd.Series]:
+def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, percentiles: list[int] = [20, 40, 60, 80]) -> tuple[dict[int, pd.Series], dict[int, float]]:
     """Calculate percentile curves for net production across time of day.
 
     Args:
         df: DataFrame with timestamp and net_energy_kwh columns
+        time_bins_per_day: Number of time bins per day (for calculating interval hours)
         percentiles: List of percentiles to calculate (e.g., [20, 40, 60, 80])
 
     Returns:
-        Dictionary mapping percentile to Series of values by time bin
+        Tuple of (dictionary mapping percentile to Series of values by time bin,
+                  dictionary mapping percentile to total area under curve in kWh)
     """
     # Extract time components
     df = df.copy()
     df["date"] = df["timestamp"].dt.date
-    df["time_bin"] = df["timestamp"].dt.hour * 4 + df["timestamp"].dt.minute // 15
+    minutes_per_bin = 1440 // time_bins_per_day
+    df["time_bin"] = df["timestamp"].dt.hour * (60 // minutes_per_bin) + df["timestamp"].dt.minute // minutes_per_bin
 
     # Get the energy column (corrected if available)
     energy_col = "net_energy_kwh_corrected" if "net_energy_kwh_corrected" in df.columns else "net_energy_kwh"
@@ -108,6 +111,10 @@ def calculate_percentile_curves(df: pd.DataFrame, percentiles: list[int] = [20, 
     )
 
     curves = {}
+    areas = {}
+    # Calculate interval hours from time_bins_per_day
+    interval_hours = 24 / time_bins_per_day
+
     # Clip values below zero before calculating percentiles
     clipped_pivot = pivot.clip(lower=0)
     for p in percentiles:
@@ -117,8 +124,10 @@ def calculate_percentile_curves(df: pd.DataFrame, percentiles: list[int] = [20, 
             name=f"p{p}"
         )
         curves[p] = curve
+        # Calculate area under curve (total kWh)
+        areas[p] = curve.sum() * interval_hours
 
-    return curves
+    return curves, areas
 
 
 def create_2d_histogram(
@@ -215,6 +224,8 @@ def create_2d_histogram(
     for h in range(24):
         for m in range(0, 60, minutes_per_bin):
             time_labels_all.append(f"{h:02d}:{m:02d}")
+    # Create end time labels for each bin (start time of next bin, or 24:00 for last)
+    time_labels_end = time_labels_all[1:] + ["24:00"]
     # X-axis labels at hour boundaries (edges), including 24:00 at the end
     bins_per_hour = 60 // minutes_per_bin
     time_label_positions = list(range(0, time_bins_per_day + 1, bins_per_hour))
@@ -238,13 +249,13 @@ def create_2d_histogram(
             ),
         ),
         hovertemplate=(
-            "Time: %{customdata[0]}<br>" +
-            "Energy: %{customdata[1]:.2f} kWh<br>" +
+            "Time: %{customdata[0]} - %{customdata[1]}<br>" +
+            "Energy: %{customdata[2]:.2f} kWh<br>" +
             "Days exceeding: %{z}<br>" +
             "<extra></extra>"
         ),
-        # customdata: [time_label, lower_edge] for each (y_bin, x_bin) cell
-        customdata=[[[time_labels_all[x], power_bin_edges[y]] for x in range(time_bins_per_day)] for y in range(power_bins)],
+        # customdata: [start_time, end_time, lower_edge] for each (y_bin, x_bin) cell
+        customdata=[[[time_labels_all[x], time_labels_end[x], power_bin_edges[y]] for x in range(time_bins_per_day)] for y in range(power_bins)],
     ))
 
     # Update layout
@@ -289,26 +300,42 @@ def create_2d_histogram(
     percentile_labels = {20: "20th percentile", 40: "40th percentile",
                          60: "60th percentile", 80: "80th percentile"}
 
-    curves = calculate_percentile_curves(df, percentiles=[20, 40, 60, 80])
-    x_positions = [i + 0.5 for i in range(time_bins_per_day)]
+    curves, areas = calculate_percentile_curves(df, time_bins_per_day, percentiles=[20, 40, 60, 80])
+
+    # Create time interval labels for hover (start - end time)
+    time_interval_labels = []
+    for i in range(time_bins_per_day):
+        start = time_labels_all[i]
+        # Calculate end time
+        end_idx = min(i + 1, time_bins_per_day - 1)
+        end = time_labels_all[end_idx] if end_idx < len(time_labels_all) else "24:00"
+        time_interval_labels.append(f"{start} - {end}")
+
+    # Use bin edges for x positions to align step function with bins
+    # For step function 'hv', points are at bin edges
+    x_edges = list(range(time_bins_per_day + 1))
 
     for p, curve in curves.items():
-        # Ensure curve has values for all time bins
+        # Get curve values, append last value for step function
         curve_values = [curve.get(i, np.nan) for i in range(time_bins_per_day)]
+        # For step plot, we need one extra point at the end with same value
+        step_x = x_edges
+        step_y = curve_values + [curve_values[-1] if curve_values else np.nan]
 
         fig.add_trace(go.Scatter(
-            x=x_positions,
-            y=curve_values,
+            x=step_x,
+            y=step_y,
             mode="lines",
-            name=percentile_labels[p],
-            line=dict(color=percentile_colors[p], width=2),
+            name=f"{percentile_labels[p]} ({areas[p]:.1f} kWh)",
+            line=dict(color=percentile_colors[p], width=2, shape="hv"),  # Horizontal-Vertical step
             hovertemplate=(
                 f"{percentile_labels[p]}<br>" +
                 "Time: %{customdata}<br>" +
                 "Energy: %{y:.2f} kWh<br>" +
+                f"Total: {areas[p]:.1f} kWh<br>" +
                 "<extra></extra>"
             ),
-            customdata=time_labels_all,
+            customdata=time_interval_labels + [time_interval_labels[-1]] if time_interval_labels else [],
         ))
 
     # Update layout to show legend at bottom left to avoid color scale overlap
