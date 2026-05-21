@@ -219,6 +219,13 @@ def create_2d_histogram(
     if min_power is None:
         min_power = max(-1, df[energy_col].min())  # Cap at -1 kWh for visual clarity
 
+    # Compute percentile curves now so we can extend max_power to cover their peak
+    curves, percentiles_found = calculate_percentile_curves(df, time_bins_per_day, target_areas=[1, 2, 3, 4, 5])
+    if curves:
+        curves_max = max(float(curve.max()) for curve in curves.values())
+        if curves_max > max_power:
+            max_power = np.ceil(curves_max / bin_size) * bin_size
+
     # Create bins with 0 as a boundary: ..., [-0.2,-0.1), [-0.1,0), [0,0.1), [0.1,0.2), ...
     # Calculate how many bins needed below and above 0
     bins_below_zero = int(np.ceil(-min_power / bin_size)) if min_power < 0 else 0
@@ -334,8 +341,6 @@ def create_2d_histogram(
         4: "rgba(255, 165, 0, 0.7)",
         5: "rgba(255, 0, 0, 0.7)",
     }
-
-    curves, percentiles_found = calculate_percentile_curves(df, time_bins_per_day, target_areas=[1, 2, 3, 4, 5])
 
     # Create time interval labels for hover (start - end time)
     time_interval_labels = []
