@@ -100,15 +100,23 @@ def load_csv_data(csv_path: Path) -> pd.DataFrame:
         raise ValueError(f"Path does not exist: {csv_path}")
 
 
-def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, target_areas: list[float] = [1, 2, 3, 4, 5]) -> tuple[dict[float, pd.Series], dict[float, float]]:
+def calculate_percentile_curves(
+    df: pd.DataFrame,
+    time_bins_per_day: int,
+    target_areas: list[float],
+    power_bin_edges: np.ndarray,
+) -> tuple[dict[float, pd.Series], dict[float, float]]:
     """Calculate percentile curves for fixed areas under curve.
 
-    For each target AUC (in kWh), finds the percentile whose curve integrates to that area.
+    Values are snapped to power_bin_edges before the AUC is computed, so the
+    binary search converges to the right percentile for the binned curve and the
+    returned curves already sit on the histogram's y-grid.
 
     Args:
         df: DataFrame with timestamp and net_energy_kwh columns
         time_bins_per_day: Number of time bins per day (for calculating interval hours)
         target_areas: List of target AUC values in kWh (e.g., [1, 2, 3, 4, 5])
+        power_bin_edges: Histogram bin edges used to snap curve values
 
     Returns:
         Tuple of (dictionary mapping target area to Series of values by time bin,
@@ -132,8 +140,15 @@ def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, target
     interval_hours = 24 / time_bins_per_day
     clipped_pivot = pivot.clip(lower=0)
 
+    def snap(values: np.ndarray) -> np.ndarray:
+        """Snap each value down to the lower edge of its histogram bin."""
+        idx = np.searchsorted(power_bin_edges, values, side='right') - 1
+        idx = np.clip(idx, 0, len(power_bin_edges) - 2)
+        return power_bin_edges[idx]
+
     def auc_for_percentile(p: float) -> float:
-        return float(np.nansum(np.nanpercentile(clipped_pivot.values, p, axis=0)) * interval_hours)
+        raw = np.nanpercentile(clipped_pivot.values, p, axis=0)
+        return float(np.nansum(snap(raw)) * interval_hours)
 
     max_auc = auc_for_percentile(100)
 
@@ -143,7 +158,7 @@ def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, target
     for target in target_areas:
         if target > max_auc:
             continue
-        # Binary search for percentile whose AUC equals target
+        # Binary search for percentile whose snapped AUC equals target
         lo, hi = 0.0, 100.0
         for _ in range(60):
             mid = (lo + hi) / 2
@@ -153,7 +168,7 @@ def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, target
                 hi = mid
         p = (lo + hi) / 2
         curve = pd.Series(
-            np.nanpercentile(clipped_pivot.values, p, axis=0),
+            snap(np.nanpercentile(clipped_pivot.values, p, axis=0)),
             index=clipped_pivot.columns,
             name=f"auc_{target}",
         )
@@ -227,23 +242,33 @@ def create_2d_histogram(
     if min_power is None:
         min_power = max(-1, df[energy_col].min())  # Cap at -1 kWh for visual clarity
 
-    # Compute percentile curves now so we can extend max_power to cover their peak
-    curves, percentiles_found = calculate_percentile_curves(df, time_bins_per_day, target_areas=[1, 2, 3, 4, 5])
+    def make_bin_edges(lo: float, hi: float) -> np.ndarray:
+        """Build bin edges with 0 as a boundary, aligned to bin_size."""
+        n_below = int(np.ceil(-lo / bin_size)) if lo < 0 else 0
+        n_above = int(np.ceil(hi / bin_size)) if hi > 0 else 0
+        neg = np.arange(-n_below, 0) * bin_size if n_below > 0 else np.array([])
+        pos = np.arange(0, n_above + 1) * bin_size if n_above > 0 else np.array([0.0])
+        return np.concatenate([neg, pos])
+
+    # Provisional bin edges (based on data range only) — needed by the curves
+    # so AUC snapping uses a consistent grid.
+    power_bin_edges = make_bin_edges(min_power, max_power)
+
+    # Compute percentile curves now so we can extend max_power to cover their peak.
+    curves, percentiles_found = calculate_percentile_curves(
+        df, time_bins_per_day, target_areas=[1, 2, 3, 4, 5], power_bin_edges=power_bin_edges
+    )
     if curves:
         curves_max = max(float(curve.max()) for curve in curves.values())
         if curves_max > max_power:
             max_power = np.ceil(curves_max / bin_size) * bin_size
+            # Recompute edges and re-run curves with the extended grid so the
+            # snapping and AUC are consistent with the final histogram range.
+            power_bin_edges = make_bin_edges(min_power, max_power)
+            curves, percentiles_found = calculate_percentile_curves(
+                df, time_bins_per_day, target_areas=[1, 2, 3, 4, 5], power_bin_edges=power_bin_edges
+            )
 
-    # Create bins with 0 as a boundary: ..., [-0.2,-0.1), [-0.1,0), [0,0.1), [0.1,0.2), ...
-    # Calculate how many bins needed below and above 0
-    bins_below_zero = int(np.ceil(-min_power / bin_size)) if min_power < 0 else 0
-    bins_above_zero = int(np.ceil(max_power / bin_size)) if max_power > 0 else 0
-
-    # Create edges: negative bins (descending), then 0, then positive bins
-    negative_edges = np.arange(-bins_below_zero, 0) * bin_size if bins_below_zero > 0 else np.array([])
-    positive_edges = np.arange(0, bins_above_zero + 1) * bin_size if bins_above_zero > 0 else np.array([0.0])
-
-    power_bin_edges = np.concatenate([negative_edges, positive_edges])
     power_bins = len(power_bin_edges) - 1
     power_bin_centers = (power_bin_edges[:-1] + power_bin_edges[1:]) / 2
 
@@ -363,12 +388,9 @@ def create_2d_histogram(
     }
 
     # Create time interval labels for hover (start - end time)
-    time_interval_labels = []
-    for i in range(time_bins_per_day):
-        start = time_labels_all[i]
-        end_idx = min(i + 1, time_bins_per_day - 1)
-        end = time_labels_all[end_idx] if end_idx < len(time_labels_all) else "24:00"
-        time_interval_labels.append(f"{start} - {end}")
+    time_interval_labels = [
+        f"{time_labels_all[i]} - {time_labels_end[i]}" for i in range(time_bins_per_day)
+    ]
 
     # Use bin edges for x positions to align step function with bins
     x_edges = list(range(time_bins_per_day + 1))
