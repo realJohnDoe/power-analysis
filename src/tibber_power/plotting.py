@@ -200,6 +200,12 @@ def create_2d_histogram(
 
     # Apply battery correction
     df = apply_correction(df, profile=get_default_profile())
+    # Convert the per-row watt correction to kWh for the interval and add to net energy.
+    # battery_correction_w is positive → battery is discharging → adds to net consumption.
+    interval_hours = (1440 / time_bins_per_day) / 60
+    df["net_energy_kwh_corrected"] = (
+        df["net_energy_kwh"] + df["battery_correction_w"] / 1000 * interval_hours
+    )
 
     # Extract time components
     df["hour"] = df["timestamp"].dt.hour
