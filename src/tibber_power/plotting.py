@@ -49,6 +49,25 @@ def compute_power_from_accumulated(df: pd.DataFrame, time_bins_per_day: int) -> 
     return resampled
 
 
+_EXPECTED_COLS = ["timestamp", "accumulated_consumption", "accumulated_production"]
+
+
+def _read_csv_file(path: Path) -> pd.DataFrame:
+    """Read a single CSV file, recovering gracefully from a missing header row.
+
+    If the file was created by a month-rollover bug the header row may be absent,
+    so the first data row ends up as the column names.  We detect this by checking
+    whether all expected columns are present and, if not, re-read with explicit
+    column names (treating whatever is on line 1 as data, not a header).
+    """
+    df = pd.read_csv(path)
+    if not all(col in df.columns for col in _EXPECTED_COLS):
+        # Header is missing — the first row was already parsed as column names.
+        # Re-read with explicit names so that row is kept as data.
+        df = pd.read_csv(path, header=None, names=_EXPECTED_COLS)
+    return df
+
+
 def load_csv_data(csv_path: Path) -> pd.DataFrame:
     """Load CSV data from a file or directory of CSV files.
 
@@ -63,7 +82,7 @@ def load_csv_data(csv_path: Path) -> pd.DataFrame:
     if csv_path.is_file():
         if csv_path.suffix.lower() != ".csv":
             raise ValueError(f"File must be a CSV: {csv_path}")
-        return pd.read_csv(csv_path)
+        return _read_csv_file(csv_path)
 
     elif csv_path.is_dir():
         csv_files = list(csv_path.glob("*.csv"))
@@ -74,7 +93,7 @@ def load_csv_data(csv_path: Path) -> pd.DataFrame:
         dfs = []
         for f in sorted(csv_files):
             print(f"  Loading: {f.name}")
-            dfs.append(pd.read_csv(f))
+            dfs.append(_read_csv_file(f))
         return pd.concat(dfs, ignore_index=True)
 
     else:

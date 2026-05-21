@@ -260,18 +260,27 @@ class PulseCollector:
         """Save readings to CSV, appending if file exists."""
         if not self.readings:
             return
-        
-        self.output_file.parent.mkdir(parents=True, exist_ok=True)
-        df = pd.DataFrame([r.to_dict() for r in self.readings])
-        
-        # Append if file exists, otherwise create new
-        if self.output_file.exists():
-            df.to_csv(self.output_file, index=False, mode='a', header=False)
-        else:
-            df.to_csv(self.output_file, index=False)
-        
-        # Clear readings after saving to prevent duplicates on reconnect
+
+        # Snapshot readings before accessing output_file, because the property
+        # has a side-effect: it clears self.readings when the month rolls over.
+        # Without this, accessing self.output_file below could wipe the readings
+        # we're about to write, causing the new month's file to be created empty
+        # (and then subsequent saves to append data without a header row).
+        readings = list(self.readings)
         self.readings = []
+
+        output_file = self.output_file
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        df = pd.DataFrame([r.to_dict() for r in readings])
+
+        # Append only if file exists AND already has content (i.e. has a header).
+        # An empty file (e.g. created by a crashed previous run) must be treated as
+        # a new file so that the header row is written first.
+        if output_file.exists() and output_file.stat().st_size > 0:
+            df.to_csv(output_file, index=False, mode='a', header=False)
+        else:
+            df.to_csv(output_file, index=False)
 
     async def _stop_after(self, seconds: float):
         """Stop collection after specified duration."""
