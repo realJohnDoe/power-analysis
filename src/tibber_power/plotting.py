@@ -120,6 +120,7 @@ def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, target
     df["time_bin"] = (df["timestamp"].dt.hour * 60 + df["timestamp"].dt.minute) // minutes_per_bin
 
     energy_col = "net_energy_kwh_corrected" if "net_energy_kwh_corrected" in df.columns else "net_energy_kwh"
+    df[energy_col] = df[energy_col].astype(float)
 
     pivot = df.pivot_table(
         index="date",
@@ -214,6 +215,7 @@ def create_2d_histogram(
 
     # Determine energy range (use corrected net energy if available)
     energy_col = "net_energy_kwh_corrected" if "net_energy_kwh_corrected" in df.columns else "net_energy_kwh"
+    df[energy_col] = df[energy_col].astype(float)
     if max_power is None:
         max_power = df[energy_col].quantile(0.99)  # Use 99th percentile to exclude outliers
     if min_power is None:

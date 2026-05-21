@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -196,6 +197,7 @@ def plot(
             typer.echo("Plot displayed.")
     except Exception as e:
         typer.echo(f"Error generating plot: {e}", err=True)
+        typer.echo(traceback.format_exc(), err=True)
         raise typer.Exit(1)
 
 
