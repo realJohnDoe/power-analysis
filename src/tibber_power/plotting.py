@@ -100,53 +100,66 @@ def load_csv_data(csv_path: Path) -> pd.DataFrame:
         raise ValueError(f"Path does not exist: {csv_path}")
 
 
-def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, percentiles: list[int] = [20, 40, 60, 80]) -> tuple[dict[int, pd.Series], dict[int, float]]:
-    """Calculate percentile curves for net production across time of day.
+def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, target_areas: list[float] = [1, 2, 3, 4, 5]) -> tuple[dict[float, pd.Series], dict[float, float]]:
+    """Calculate percentile curves for fixed areas under curve.
+
+    For each target AUC (in kWh), finds the percentile whose curve integrates to that area.
 
     Args:
         df: DataFrame with timestamp and net_energy_kwh columns
         time_bins_per_day: Number of time bins per day (for calculating interval hours)
-        percentiles: List of percentiles to calculate (e.g., [20, 40, 60, 80])
+        target_areas: List of target AUC values in kWh (e.g., [1, 2, 3, 4, 5])
 
     Returns:
-        Tuple of (dictionary mapping percentile to Series of values by time bin,
-                  dictionary mapping percentile to total area under curve in kWh)
+        Tuple of (dictionary mapping target area to Series of values by time bin,
+                  dictionary mapping target area to the percentile found)
     """
-    # Extract time components
     df = df.copy()
     df["date"] = df["timestamp"].dt.date
     minutes_per_bin = 1440 // time_bins_per_day
     df["time_bin"] = df["timestamp"].dt.hour * (60 // minutes_per_bin) + df["timestamp"].dt.minute // minutes_per_bin
 
-    # Get the energy column (corrected if available)
     energy_col = "net_energy_kwh_corrected" if "net_energy_kwh_corrected" in df.columns else "net_energy_kwh"
 
-    # Pivot to get time bins as columns, dates as rows
     pivot = df.pivot_table(
         index="date",
         columns="time_bin",
         values=energy_col,
-        aggfunc="max"  # Use max energy in each time bin per day
+        aggfunc="max"
     )
 
-    curves = {}
-    areas = {}
-    # Calculate interval hours from time_bins_per_day
     interval_hours = 24 / time_bins_per_day
-
-    # Clip values below zero before calculating percentiles
     clipped_pivot = pivot.clip(lower=0)
-    for p in percentiles:
+
+    def auc_for_percentile(p: float) -> float:
+        return float(np.nansum(np.nanpercentile(clipped_pivot.values, p, axis=0)) * interval_hours)
+
+    max_auc = auc_for_percentile(100)
+
+    curves = {}
+    percentiles_found = {}
+
+    for target in target_areas:
+        if target > max_auc:
+            continue
+        # Binary search for percentile whose AUC equals target
+        lo, hi = 0.0, 100.0
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if auc_for_percentile(mid) < target:
+                lo = mid
+            else:
+                hi = mid
+        p = (lo + hi) / 2
         curve = pd.Series(
             np.nanpercentile(clipped_pivot.values, p, axis=0),
             index=clipped_pivot.columns,
-            name=f"p{p}"
+            name=f"auc_{target}",
         )
-        curves[p] = curve
-        # Calculate area under curve (total kWh)
-        areas[p] = curve.sum() * interval_hours
+        curves[target] = curve
+        percentiles_found[target] = p
 
-    return curves, areas
+    return curves, percentiles_found
 
 
 def create_2d_histogram(
@@ -313,31 +326,32 @@ def create_2d_histogram(
     )
 
     # Add annotation
-    # Add battery dispatch percentile curves
-    percentile_colors = {20: "rgba(255, 0, 0, 0.7)", 40: "rgba(255, 165, 0, 0.7)",
-                         60: "rgba(0, 255, 0, 0.7)", 80: "rgba(0, 0, 255, 0.7)"}
-    percentile_labels = {20: "20th percentile", 40: "40th percentile",
-                         60: "60th percentile", 80: "80th percentile"}
+    # Add dispatch curves for fixed AUC targets
+    auc_colors = {
+        1: "rgba(0, 0, 255, 0.7)",
+        2: "rgba(0, 180, 180, 0.7)",
+        3: "rgba(0, 200, 0, 0.7)",
+        4: "rgba(255, 165, 0, 0.7)",
+        5: "rgba(255, 0, 0, 0.7)",
+    }
 
-    curves, areas = calculate_percentile_curves(df, time_bins_per_day, percentiles=[20, 40, 60, 80])
+    curves, percentiles_found = calculate_percentile_curves(df, time_bins_per_day, target_areas=[1, 2, 3, 4, 5])
 
     # Create time interval labels for hover (start - end time)
     time_interval_labels = []
     for i in range(time_bins_per_day):
         start = time_labels_all[i]
-        # Calculate end time
         end_idx = min(i + 1, time_bins_per_day - 1)
         end = time_labels_all[end_idx] if end_idx < len(time_labels_all) else "24:00"
         time_interval_labels.append(f"{start} - {end}")
 
     # Use bin edges for x positions to align step function with bins
-    # For step function 'hv', points are at bin edges
     x_edges = list(range(time_bins_per_day + 1))
 
-    for p, curve in curves.items():
-        # Get curve values, append last value for step function
+    for target, curve in curves.items():
+        p = percentiles_found[target]
+        color = auc_colors.get(target, "rgba(128, 128, 128, 0.7)")
         curve_values = [curve.get(i, np.nan) for i in range(time_bins_per_day)]
-        # For step plot, we need one extra point at the end with same value
         step_x = x_edges
         step_y = curve_values + [curve_values[-1] if curve_values else np.nan]
 
@@ -345,13 +359,12 @@ def create_2d_histogram(
             x=step_x,
             y=step_y,
             mode="lines",
-            name=f"{percentile_labels[p]} ({areas[p]:.1f} kWh)",
-            line=dict(color=percentile_colors[p], width=2, shape="hv"),  # Horizontal-Vertical step
+            name=f"{target} kWh (p={p:.0f}%)",
+            line=dict(color=color, width=2, shape="hv"),
             hovertemplate=(
-                f"{percentile_labels[p]}<br>" +
+                f"{target} kWh curve (p={p:.1f}%)<br>" +
                 "Time: %{customdata}<br>" +
                 "Energy: %{y:.2f} kWh<br>" +
-                f"Total: {areas[p]:.1f} kWh<br>" +
                 "<extra></extra>"
             ),
             customdata=time_interval_labels + [time_interval_labels[-1]] if time_interval_labels else [],
@@ -360,7 +373,7 @@ def create_2d_histogram(
     # Update layout to show legend at bottom left to avoid color scale overlap
     fig.update_layout(
         legend=dict(
-            title=dict(text="Dispatch Curves"),
+            title=dict(text="Dispatch Curves (AUC target)"),
             x=0.01,
             y=0.01,
             xanchor="left",
