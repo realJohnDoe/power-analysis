@@ -266,13 +266,16 @@ def create_2d_histogram(
             days_exceeding = (time_data[energy_col] > threshold).sum()
             histogram[power_idx, time_idx] = days_exceeding
 
-    # Create time labels for all bins
+    # Create time labels for all bins (one per bin, based on bin width)
     time_labels_all = []
-    for h in range(24):
-        for m in range(0, 60, minutes_per_bin):
-            time_labels_all.append(f"{h:02d}:{m:02d}")
-    # Create end time labels for each bin (start time of next bin, or 24:00 for last)
-    time_labels_end = time_labels_all[1:] + ["24:00"]
+    for i in range(time_bins_per_day):
+        total_minutes = i * minutes_per_bin
+        time_labels_all.append(f"{total_minutes // 60:02d}:{total_minutes % 60:02d}")
+    # End label is the start of the next bin (or 24:00 for the last bin)
+    time_labels_end = []
+    for i in range(time_bins_per_day):
+        total_minutes = (i + 1) * minutes_per_bin
+        time_labels_end.append("24:00" if total_minutes >= 1440 else f"{total_minutes // 60:02d}:{total_minutes % 60:02d}")
     # X-axis labels: at every bin edge when bins are wider than an hour,
     # otherwise only at hour boundaries
     if minutes_per_bin >= 60:
