@@ -117,7 +117,7 @@ def calculate_percentile_curves(df: pd.DataFrame, time_bins_per_day: int, target
     df = df.copy()
     df["date"] = df["timestamp"].dt.date
     minutes_per_bin = 1440 // time_bins_per_day
-    df["time_bin"] = df["timestamp"].dt.hour * (60 // minutes_per_bin) + df["timestamp"].dt.minute // minutes_per_bin
+    df["time_bin"] = (df["timestamp"].dt.hour * 60 + df["timestamp"].dt.minute) // minutes_per_bin
 
     energy_col = "net_energy_kwh_corrected" if "net_energy_kwh_corrected" in df.columns else "net_energy_kwh"
 
@@ -207,7 +207,7 @@ def create_2d_histogram(
 
     # Create time-of-day bins based on specified resolution
     minutes_per_bin = 1440 // time_bins_per_day
-    df["time_bin"] = df["hour"] * (60 // minutes_per_bin) + df["minute"] // minutes_per_bin
+    df["time_bin"] = (df["hour"] * 60 + df["minute"]) // minutes_per_bin
 
     # Get unique days for counting
     unique_days = df["date"].nunique()
@@ -265,10 +265,19 @@ def create_2d_histogram(
             time_labels_all.append(f"{h:02d}:{m:02d}")
     # Create end time labels for each bin (start time of next bin, or 24:00 for last)
     time_labels_end = time_labels_all[1:] + ["24:00"]
-    # X-axis labels at hour boundaries (edges), including 24:00 at the end
-    bins_per_hour = 60 // minutes_per_bin
-    time_label_positions = list(range(0, time_bins_per_day + 1, bins_per_hour))
-    time_labels_hourly = [f"{h:02d}:00" for h in range(25)]  # 00:00 to 24:00
+    # X-axis labels: at every bin edge when bins are wider than an hour,
+    # otherwise only at hour boundaries
+    if minutes_per_bin >= 60:
+        # One tick per bin edge
+        time_label_positions = list(range(time_bins_per_day + 1))
+        time_labels_hourly = [
+            f"{(i * minutes_per_bin) // 60:02d}:{(i * minutes_per_bin) % 60:02d}"
+            for i in range(time_bins_per_day + 1)
+        ]
+    else:
+        bins_per_hour = 60 // minutes_per_bin
+        time_label_positions = list(range(0, time_bins_per_day + 1, bins_per_hour))
+        time_labels_hourly = [f"{h:02d}:00" for h in range(25)]  # 00:00 to 24:00
 
     # Create the heatmap with Plotly
     # Calculate cell centers so bin edges align with tick labels
