@@ -7,7 +7,7 @@ import typer
 
 from tibber_power.api import TibberAPI
 from tibber_power.config import TibberConfig
-from tibber_power.plotting import create_2d_histogram
+from tibber_power.plotting import create_2d_histogram, create_daily_history
 from tibber_power.websocket import PulseCollector
 
 app = typer.Typer(help="Tibber Pulse data streaming tool")
@@ -197,6 +197,44 @@ def plot(
             typer.echo("Plot displayed.")
     except Exception as e:
         typer.echo(f"Error generating plot: {e}", err=True)
+        typer.echo(traceback.format_exc(), err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def history(
+    input_path: Path = typer.Argument(
+        ...,
+        help="Input CSV file or directory containing CSV files to analyze",
+        exists=True,
+        dir_okay=True,
+        readable=True,
+    ),
+    output: Path = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output HTML file path (e.g., history.html). Opens in browser if not set.",
+    ),
+) -> None:
+    """Generate a daily bar chart of grid export and import.
+
+    Plots one green bar per day (positive y) for grid export (Einspeisung) and
+    one red bar per day (negative y) for grid import (Netzentnahme), giving a
+    quick overview of what was fed into and drawn from the grid each day.
+    """
+    try:
+        create_daily_history(
+            csv_path=input_path,
+            output_path=output,
+        )
+        if output:
+            typer.echo(f"Plot saved to: {output}")
+        else:
+            typer.echo("Plot displayed.")
+    except Exception as e:
+        typer.echo(f"Error generating plot: {e}", err=True)
+        import traceback
         typer.echo(traceback.format_exc(), err=True)
         raise typer.Exit(1)
 

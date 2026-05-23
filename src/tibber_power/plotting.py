@@ -457,3 +457,120 @@ def create_2d_histogram(
     else:
         fig.show()
         return None
+
+
+def create_daily_history(
+    csv_path: Path,
+    output_path: Path | None,
+) -> Path | None:
+    """Create an interactive daily bar chart of grid export and import.
+
+    Shows one green bar per day (positive y) for grid export (Einspeisung) and
+    one red bar per day (negative y) for grid import (Netzentnahme).
+
+    Args:
+        csv_path: Path to a CSV file or directory containing CSV files with Tibber data
+        output_path: Where to save the plot (HTML file). Opens in browser if not set.
+
+    Returns:
+        Path to the saved plot, or None if displayed in browser.
+    """
+    df = load_csv_data(csv_path)
+
+    if len(df) < 2:
+        raise ValueError("Need at least 2 data points")
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["date"] = df["timestamp"].dt.date
+
+    # Daily totals: the accumulated counters reset at midnight each day,
+    # so the maximum value within a day equals the total for that day.
+    daily = (
+        df.groupby("date")
+        .agg(
+            grid_import=("accumulated_consumption", "max"),
+            grid_export=("accumulated_production", "max"),
+        )
+        .reset_index()
+    )
+    daily = daily.sort_values("date")
+
+    dates = [str(d) for d in daily["date"]]
+    grid_export = daily["grid_export"].tolist()
+    grid_import_neg = (-daily["grid_import"]).tolist()  # Negate so bars go below zero
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=dates,
+            y=grid_export,
+            name="Export",
+            marker_color="rgba(34, 139, 34, 0.85)",
+            hovertemplate="<b>%{x}</b><br>Export: %{y:.2f} kWh<extra></extra>",
+        )
+    )
+
+    fig.add_trace(
+        go.Bar(
+            x=dates,
+            y=grid_import_neg,
+            name="Import",
+            marker_color="rgba(200, 40, 40, 0.85)",
+            hovertemplate="<b>%{x}</b><br>Import: %{customdata:.2f} kWh<extra></extra>",
+            customdata=daily["grid_import"].tolist(),
+        )
+    )
+
+    unique_days = len(daily)
+
+    fig.update_layout(
+        title=dict(
+            text=(
+                f"Daily Grid Export & Import<br>"
+                f"<sub>Data: {csv_path.name} — {unique_days} days</sub>"
+            ),
+            x=0.5,
+            xanchor="center",
+        ),
+        barmode="overlay",
+        xaxis=dict(
+            title="Date",
+            tickangle=-45,
+            showgrid=True,
+            gridcolor="rgba(128,128,128,0.2)",
+        ),
+        yaxis=dict(
+            title="Energy (kWh)",
+            showgrid=True,
+            gridcolor="rgba(128,128,128,0.2)",
+            zeroline=True,
+            zerolinecolor="rgba(0,0,0,0.4)",
+            zerolinewidth=1.5,
+        ),
+        legend=dict(
+            x=0.01,
+            y=0.99,
+            xanchor="left",
+            yanchor="top",
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="gray",
+            borderwidth=1,
+        ),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        width=1400,
+        height=600,
+        margin=dict(l=80, r=60, t=100, b=100),
+        hovermode="x unified",
+    )
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.write_html(output_path, include_plotlyjs="cdn")
+        print(f"Plot saved to: {output_path}")
+        return output_path
+    else:
+        fig.show()
+        return None
