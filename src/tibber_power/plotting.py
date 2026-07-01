@@ -466,7 +466,9 @@ def create_daily_history(
     """Create an interactive daily bar chart of grid export and import.
 
     Shows one green bar per day (positive y) for grid export (Einspeisung) and
-    one red bar per day (negative y) for grid import (Netzentnahme).
+    one red bar per day (negative y) for grid import (Netzentnahme), with a
+    binary heatmap below (hour of day vs. date) showing whether each hour has
+    at least one data point, to make date/hour gaps visible at a glance.
 
     Args:
         csv_path: Path to a CSV file or directory containing CSV files with Tibber data
@@ -482,6 +484,7 @@ def create_daily_history(
 
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df["date"] = df["timestamp"].dt.date
+    df["hour"] = df["timestamp"].dt.hour
 
     # Daily totals: the accumulated counters reset at midnight each day,
     # so the maximum value within a day equals the total for that day.
@@ -499,7 +502,30 @@ def create_daily_history(
     grid_export = daily["grid_export"].tolist()
     grid_import_neg = (-daily["grid_import"]).tolist()  # Negate so bars go below zero
 
-    fig = go.Figure()
+    unique_days = len(daily)
+
+    # Binary presence grid: rows are hours of day, columns are every date in the
+    # full range (including days with no rows at all), so full-day gaps show up
+    # as an all-empty column rather than being silently skipped.
+    all_dates = list(pd.date_range(daily["date"].min(), daily["date"].max(), freq="D").date)
+    all_hours = list(range(24))
+    presence = (
+        df.assign(has_data=1)
+        .pivot_table(index="hour", columns="date", values="has_data", aggfunc="max")
+        .reindex(index=all_hours, columns=all_dates)
+        .fillna(0)
+    )
+    presence_dates = [str(d) for d in all_dates]
+    presence_labels = np.where(presence.values == 1, "Data", "No data")
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.7, 0.3],
+        vertical_spacing=0.08,
+        subplot_titles=("Daily Grid Export & Import", "Data Availability by Hour"),
+    )
 
     fig.add_trace(
         go.Bar(
@@ -508,7 +534,9 @@ def create_daily_history(
             name="Export",
             marker_color="rgba(34, 139, 34, 0.85)",
             hovertemplate="<b>%{x}</b><br>Export: %{y:.2f} kWh<extra></extra>",
-        )
+        ),
+        row=1,
+        col=1,
     )
 
     fig.add_trace(
@@ -519,10 +547,35 @@ def create_daily_history(
             marker_color="rgba(200, 40, 40, 0.85)",
             hovertemplate="<b>%{x}</b><br>Import: %{customdata:.2f} kWh<extra></extra>",
             customdata=daily["grid_import"].tolist(),
-        )
+        ),
+        row=1,
+        col=1,
     )
 
-    unique_days = len(daily)
+    fig.add_trace(
+        go.Heatmap(
+            x=presence_dates,
+            y=all_hours,
+            z=presence.values,
+            customdata=presence_labels,
+            colorscale=[[0, "rgba(225,225,225,1)"], [1, "rgba(70,100,180,0.85)"]],
+            zmin=0,
+            zmax=1,
+            xgap=1,
+            ygap=1,
+            showscale=True,
+            colorbar=dict(
+                title=dict(text="Data"),
+                tickvals=[0, 1],
+                ticktext=["No data", "Data"],
+                len=0.3,
+                y=0.15,
+            ),
+            hovertemplate="<b>%{x}</b><br>Hour: %{y}:00<br>%{customdata}<extra></extra>",
+        ),
+        row=2,
+        col=1,
+    )
 
     fig.update_layout(
         title=dict(
@@ -534,20 +587,6 @@ def create_daily_history(
             xanchor="center",
         ),
         barmode="overlay",
-        xaxis=dict(
-            title="Date",
-            tickangle=-45,
-            showgrid=True,
-            gridcolor="rgba(128,128,128,0.2)",
-        ),
-        yaxis=dict(
-            title="Energy (kWh)",
-            showgrid=True,
-            gridcolor="rgba(128,128,128,0.2)",
-            zeroline=True,
-            zerolinecolor="rgba(0,0,0,0.4)",
-            zerolinewidth=1.5,
-        ),
         legend=dict(
             x=0.01,
             y=0.99,
@@ -560,9 +599,44 @@ def create_daily_history(
         plot_bgcolor="white",
         paper_bgcolor="white",
         width=1400,
-        height=600,
+        height=800,
         margin=dict(l=80, r=60, t=100, b=100),
         hovermode="x unified",
+    )
+
+    fig.update_xaxes(
+        title_text="Date",
+        tickangle=-45,
+        showgrid=True,
+        gridcolor="rgba(128,128,128,0.2)",
+        categoryorder="category ascending",
+        row=2,
+        col=1,
+    )
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor="rgba(128,128,128,0.2)",
+        categoryorder="category ascending",
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        title_text="Energy (kWh)",
+        showgrid=True,
+        gridcolor="rgba(128,128,128,0.2)",
+        zeroline=True,
+        zerolinecolor="rgba(0,0,0,0.4)",
+        zerolinewidth=1.5,
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(
+        title_text="Hour of Day",
+        tickvals=[0, 6, 12, 18, 23],
+        range=[-0.5, 23.5],
+        showgrid=False,
+        row=2,
+        col=1,
     )
 
     if output_path:
