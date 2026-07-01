@@ -83,7 +83,8 @@ def get_default_profile() -> BatteryProfile:
     """Get the default battery correction profile.
 
     - Before 2026-05-21 14:00: 50 W at night (21:00–09:00), 200 W during the day.
-    - From  2026-05-21 14:00: hourly schedule with varying dispatch levels.
+    - From  2026-05-21 14:00 to 2026-07-01 09:00: hourly schedule with varying dispatch levels.
+    - From  2026-07-01 09:00: hourly schedule with 100/200/300 W dispatch levels.
     """
     before = SimpleTimeProfile(night_watts=50.0, day_watts=200.0)
     after = HourlyProfile([
@@ -94,10 +95,22 @@ def get_default_profile() -> BatteryProfile:
         (15, 21,   0.0),
         (21, 24, 200.0),
     ])
-    return ScheduledProfile(
+    stage_2026_05_21 = ScheduledProfile(
         switchover=datetime(2026, 5, 21, 14, 0, 0),
         before=before,
         after=after,
+    )
+    stage_2026_07_01 = HourlyProfile([
+        (0,  8,  100.0),
+        (8,  9,  200.0),
+        (9,  12, 300.0),
+        (12, 13, 200.0),
+        (13, 24, 100.0),
+    ])
+    return ScheduledProfile(
+        switchover=datetime(2026, 7, 1, 9, 0, 0),
+        before=stage_2026_05_21,
+        after=stage_2026_07_01,
     )
 
 
