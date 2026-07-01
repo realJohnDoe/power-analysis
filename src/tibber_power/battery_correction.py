@@ -57,26 +57,28 @@ class HourlyProfile:
 
 
 class ScheduledProfile:
-    """Switches between profiles at a specific wall-clock datetime.
+    """Switches between profiles at specific wall-clock datetimes.
 
-    Before the switchover timestamp the ``before`` profile is used;
-    from that moment onward the ``after`` profile is used.
+    Given a list of (start_time, profile) entries, the profile used for a
+    timestamp is the one with the latest start_time that is <= timestamp.
     """
 
-    def __init__(self, switchover: datetime, before: BatteryProfile, after: BatteryProfile):
+    def __init__(self, schedule: list[tuple[datetime, BatteryProfile]]):
         """
         Args:
-            switchover: The datetime at which to switch from ``before`` to ``after``.
-            before: Profile used for timestamps strictly before ``switchover``.
-            after:  Profile used for timestamps at or after ``switchover``.
+            schedule: List of (start_time, profile) tuples, in any order.
+                      The profile with the latest start_time <= timestamp is used,
+                      so entries effectively apply until the next later start_time.
         """
-        self.switchover = switchover
-        self.before = before
-        self.after = after
+        self.schedule = sorted(schedule, key=lambda entry: entry[0])
 
     def get_correction_watts(self, timestamp: datetime) -> float:
-        profile = self.after if timestamp >= self.switchover else self.before
-        return profile.get_correction_watts(timestamp)
+        active_profile = self.schedule[0][1]
+        for start_time, profile in self.schedule:
+            if start_time > timestamp:
+                break
+            active_profile = profile
+        return active_profile.get_correction_watts(timestamp)
 
 
 def get_default_profile() -> BatteryProfile:
@@ -86,32 +88,24 @@ def get_default_profile() -> BatteryProfile:
     - From  2026-05-21 14:00 to 2026-07-01 09:00: hourly schedule with varying dispatch levels.
     - From  2026-07-01 09:00: hourly schedule with 100/200/300 W dispatch levels.
     """
-    before = SimpleTimeProfile(night_watts=50.0, day_watts=200.0)
-    after = HourlyProfile([
-        (0,  6,  200.0),
-        (6,  9,  100.0),
-        (9,  12, 200.0),
-        (12, 15, 100.0),
-        (15, 21,   0.0),
-        (21, 24, 200.0),
+    return ScheduledProfile([
+        (datetime.min, SimpleTimeProfile(night_watts=50.0, day_watts=200.0)),
+        (datetime(2026, 5, 21, 14, 0, 0), HourlyProfile([
+            (0,  6,  200.0),
+            (6,  9,  100.0),
+            (9,  12, 200.0),
+            (12, 15, 100.0),
+            (15, 21,   0.0),
+            (21, 24, 200.0),
+        ])),
+        (datetime(2026, 7, 1, 9, 0, 0), HourlyProfile([
+            (0,  8,  100.0),
+            (8,  9,  200.0),
+            (9,  12, 300.0),
+            (12, 13, 200.0),
+            (13, 24, 100.0),
+        ])),
     ])
-    stage_2026_05_21 = ScheduledProfile(
-        switchover=datetime(2026, 5, 21, 14, 0, 0),
-        before=before,
-        after=after,
-    )
-    stage_2026_07_01 = HourlyProfile([
-        (0,  8,  100.0),
-        (8,  9,  200.0),
-        (9,  12, 300.0),
-        (12, 13, 200.0),
-        (13, 24, 100.0),
-    ])
-    return ScheduledProfile(
-        switchover=datetime(2026, 7, 1, 9, 0, 0),
-        before=stage_2026_05_21,
-        after=stage_2026_07_01,
-    )
 
 
 def apply_correction(df, timestamp_col: str = "timestamp", profile: BatteryProfile | None = None):
